@@ -1,5 +1,16 @@
 # Local LLM + RAG + Qdrant on a Mac (mini M4)
 
+This is a textbook local RAG pipeline. Ollama runs the pre‑trained Mistral model, Qdrant holds vectors for the PDFs, and the app glues them together so Mistral can answer questions grounded in those open-education documents.
+
+How this setup maps to "proper" RAG:
+- You ingest PDFs, chunk them, embed each chunk, and store those embeddings + text in Qdrant—this is the retrieval index.
+- On a question, you embed the query, ask Qdrant for nearest chunks, then send “context chunks + user question” to Mistral via Ollama.
+- Mistral itself stays frozen; it just "reads" the retrieved PDF snippets in the prompt and synthesizes an answer, which is exactly how RAG is described in Qdrant/Ollama examples.
+​
+You are giving your local engine a searchable memory (Qdrant) of those PDFs and letting it reason over that supplemental data at query time.
+
+---
+
 ```mermaid
 flowchart TD
     A[User Question] --> B[Python RAG Script]
@@ -12,8 +23,6 @@ flowchart TD
     E --> B
     C --> B
 ```
-
-> This system is intentionally fed with carefully chosen sources (like psychology Open Education Resources (OER) and your own notes) aligned with your goals and questions—not an indiscriminate news feed.
 
 ---
 
