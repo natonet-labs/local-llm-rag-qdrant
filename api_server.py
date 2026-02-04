@@ -1,30 +1,45 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+# api_server.py
+
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from rag import search, build_prompt, ollama_chat
 
-app = FastAPI(title="Local RAG Service")
+app = FastAPI()
+
+# static files (CSS)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# templates (HTML)
+templates = Jinja2Templates(directory="templates")
 
 
-class RAGRequest(BaseModel):
-    question: str
-    top_k: int | None = 3
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_get(request: Request):
+    return templates.TemplateResponse(
+        "chat.html",
+        {
+            "request": request,
+            "question": None,
+            "answer": None,
+        },
+    )
 
 
-class RAGResponse(BaseModel):
-    answer: str
-    contexts: list[dict]
-
-
-@app.post("/rag", response_model=RAGResponse)
-def rag_endpoint(req: RAGRequest):
-    hits = search(req.question, top_k=req.top_k or 3)
-    if not hits:
-        return RAGResponse(
-            answer="No relevant documents found in the vector store.",
-            contexts=[],
-        )
-
-    prompt = build_prompt(req.question, hits)
+@app.post("/chat", response_class=HTMLResponse)
+async def chat_post(request: Request, question: str = Form(...)):
+    # simple RAG pipeline
+    results = search(question)
+    prompt = build_prompt(question, results)
     answer = ollama_chat(prompt)
-    return RAGResponse(answer=answer, contexts=hits)
+
+    return templates.TemplateResponse(
+        "chat.html",
+        {
+            "request": request,
+            "question": question,
+            "answer": answer,
+        },
+    )

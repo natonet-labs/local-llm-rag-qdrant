@@ -1,0 +1,82 @@
+/* static/chat.css */
+
+body {
+  font-family: -apple-system, system-ui, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #f3f4f6;
+}
+
+.page {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+h1 {
+  font-size: 24px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+#messages {
+  background: white;
+  border-radius: 12px;
+  padding: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+  margin-bottom: 12px;
+}
+
+.msg {
+  margin-bottom: 10px;
+}
+
+.msg-user {
+  font-weight: 600;
+  color: #111827;
+}
+
+.msg-bot {
+  margin-top: 2px;
+  color: #111827;
+}
+
+.msg small {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.chat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-input {
+  width: 100%;
+  font-size: 17px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 60px;
+}
+
+.chat-button {
+  align-self: flex-end;
+  padding: 8px 18px;
+  font-size: 17px;
+  border-radius: 999px;
+  border: none;
+  background-color: #2563eb;
+  color: white;
+  cursor: pointer;
+}
+
+.chat-button-disabled {
+  background-color: #9ca3af;
+  cursor: default;
+}

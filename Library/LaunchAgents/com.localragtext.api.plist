@@ -4,16 +4,16 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>com.llmrag.api</string>
+    <string>com.localragtext.api</string>
 
     <key>ProgramArguments</key>
     <array>
       <string>/bin/bash</string>
-      <string>/path/to/my/projects/llm-rag/run_api_server.sh</string>
+      <string>/Users/username/projects/local-rag-text/run_api_server.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/path/to/my/projects/llm-rag</string>
+    <string>/Users/username/projects/local-rag-text</string>
 
     <key>EnvironmentVariables</key>
     <dict>
@@ -27,4 +27,3 @@
     <key>KeepAlive</key>
     <true/>
   </dict>
-</plist>

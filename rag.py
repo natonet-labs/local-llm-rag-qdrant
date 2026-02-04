@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
+from qdrant_client.http.exceptions import ResponseHandlingException
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -97,12 +98,16 @@ def index_documents(docs: List[Dict[str, Any]], batch_size: int = 256):
 def search(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
     query_vec = ollama_embed([query])[0]
 
-    res = client.query_points(
-        collection_name=QDRANT_COLLECTION,
-        query=query_vec,
-        limit=top_k,
-        with_payload=True,
-    )
+    try:
+        res = client.query_points(
+            collection_name=QDRANT_COLLECTION,
+            query=query_vec,
+            limit=top_k,
+            with_payload=True,
+        )
+    except ResponseHandlingException as e:
+        print(f"Error searching Qdrant: {e}")
+        return []
 
     out: List[Dict[str, Any]] = []
     for point in res.points:

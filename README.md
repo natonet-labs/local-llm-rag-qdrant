@@ -250,14 +250,14 @@ python rag.py --ask "Explain different bases of social power and how they affect
 
 To use this RAG from other devices (Windows laptop, iPad, iPhone), expose it as a small HTTP API running on the macOS and keep it running in the background.
 
-### 10.1 Install FastAPI and Uvicorn
+### 10.1 Install Dependencies
 
 From the project root:
 
 ```bash
 cd ~/projects/llm-rag
 source .venv/bin/activate
-python -m pip install fastapi uvicorn
+python -m pip install fastapi uvicorn jinja2 python-multipart qdrant-client ollama httpx pydantic
 ```
 
 ### 10.2 Create the API server (`api_server.py`)
@@ -266,10 +266,7 @@ Create `api_server.py` in the project root:
 
 ```bash
 cat > api_server.py << 'EOF'
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-from rag import search, build_prompt, ollama_chat
+from fastapi import FastAPI, Request, Form
 ...
 EOF
 ```
@@ -337,8 +334,9 @@ Create `~/Library/LaunchAgents/com.llmrag.api.plist`:
 Load and start the agent:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.llmrag.api.plist
-launchctl start com.llmrag.api
+launchctl load ~/Library/LaunchAgents/com.localragtext.api.plist
+launchctl start com.localragtext.api
+launchctl list | grep com.localragtext.api # displays the PID (Process ID) of the job if it is running
 ```
 
 The API server will now:

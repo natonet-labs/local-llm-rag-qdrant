@@ -1,0 +1,47 @@
+<!-- templates/chat.html -->
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Local RAG Chat</title>
+  <link rel="stylesheet" href="/static/chat.css">
+</head>
+<body>
+  <div class="page">
+    <h1>Local RAG Chat</h1>
+
+    <div id="chat">
+      <div id="messages">
+        {% if question and answer %}
+        <div class="msg">
+          <div class="msg-user">{{ question }}</div>
+          <div class="msg-bot">{{ answer }}</div>
+        </div>
+        {% endif %}
+      </div>
+
+      <form method="post" action="/chat" class="chat-form" id="chat-form">
+        <textarea
+          name="question"
+          class="chat-input"
+          placeholder="Ask anything…"
+        ></textarea>
+        <button type="submit" class="chat-button" id="send-button">Send</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('chat-form');
+    const button = document.getElementById('send-button');
+
+    if (form && button) {
+      form.addEventListener('submit', () => {
+        button.disabled = true;
+        button.textContent = 'Sending…';
+        button.classList.add('chat-button-disabled');
+      });
+    }
+  </script>
+</body>
+</html>
