@@ -51,7 +51,7 @@ def main():
         "--pdf",
         type=str,
         required=True,
-        help="Path to PDF file (e.g., pdf/Psychology2e_WEB.pdf)",
+        help="Path to PDF file (e.g., pdf/Psychology2e.pdf)",
     )
     parser.add_argument(
         "--source-prefix",
