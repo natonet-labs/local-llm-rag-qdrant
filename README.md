@@ -1,27 +1,58 @@
 # Local LLM + RAG + Qdrant on a Mac (mini M4)
 
-This is a textbook local RAG pipeline. Ollama runs the pre‑trained Mistral model, Qdrant holds vectors for the PDFs, and the app glues them together so Mistral can answer questions grounded in those open-education documents.
+This is a textbook local RAG pipeline. Ollama runs the pre-trained Mistral model, Qdrant holds vectors for the PDFs, and the app glues them together so Mistral can answer questions grounded in those open-education documents.
 
 How this setup maps to "proper" RAG:
-- You ingest PDFs, chunk them, embed each chunk, and store those embeddings + text in Qdrant—this is the retrieval index.
-- On a question, you embed the query, ask Qdrant for nearest chunks, then send “context chunks + user question” to Mistral via Ollama.
+- You ingest PDFs, chunk them, embed each chunk, and store those embeddings + text in Qdrant, this is the retrieval index.
+- On a question, you embed the query, ask Qdrant for nearest chunks, then send **context chunks + user question** to Mistral via Ollama.
 - Mistral itself stays frozen; it just "reads" the retrieved PDF snippets in the prompt and synthesizes an answer, which is exactly how RAG is described in Qdrant/Ollama examples.
-​
+
 You are giving your local engine a searchable memory (Qdrant) of those PDFs and letting it reason over that supplemental data at query time.
 
 ---
 
 ```mermaid
-flowchart TD
-    A[User Question] --> B[Python RAG Script]
-    B --> C[Ollama<br/>Mistral Chat Model]
-    B --> D[Ollama<br/>Embedding Model]
-    B --> E[Qdrant<br/>Vector Database]
-    F[OER Sources<br/>Psychology 2e PDF<br/>Other OER] --> G[Ingestion Scripts]
-    G --> D
-    G --> E
-    E --> B
-    C --> B
+graph TD
+    %% Core metaphor
+    User[User<br/>&lpar;Driver&rpar;]
+    Ollama[Ollama<br/>&lpar;Car&rpar;]
+    Mistral[Mistral AI<br/>&lpar;Engine&rpar;]
+    RAG[RAG Pipeline<br/>&lpar;Fuel Injection / GPS&rpar;]
+
+    %% Storage & fuel metaphor
+    Embeds[Embedding Model<br/>&lpar;Refinery&rpar;]
+    Qdrant[Qdrant Vector DB<br/>&lpar;Gas Tank + Fuel Lines&rpar;]
+
+    %% Knowledge sources
+    OER[Open Educational<br/>Resources &lpar;OER&rpar;]
+    Docs[Documents & Notes]
+    Ingest[Ingestion<br/>Process]
+
+    %% Questions
+    Questions[User Questions]
+
+    %% Main flow
+    User -->|Asks question| Questions
+    Questions -->|Send to| Ollama
+    Ollama -->|Uses| Mistral
+    Ollama -->|Uses| RAG
+
+    %% RAG internals &lpar;fuel system&rpar;
+    RAG -->|Converts text to vectors| Embeds
+    Embeds -->|Stores refined fuel| Qdrant
+    Qdrant -->|Provides relevant fuel<br/>&lpar;chunks&rpar;| RAG
+
+    %% Data side &lpar;fuel creation&rpar;
+    OER --> Docs
+    Docs --> Ingest
+    Ingest -->|Clean & chunk| Docs
+    Ingest -->|Embed & store| Embeds
+    Ingest --> Qdrant
+
+    %% Answer back
+    RAG -->|Context + question| Mistral
+    Mistral -->|Generates answer| Ollama
+    Ollama -->|Returns answer| User
 ```
 
 ---
@@ -29,12 +60,12 @@ flowchart TD
 ## 1. Prerequisites
 
 1. Hardware  
-   - Mac with 32 GB RAM.
+   - Mac with 32 GB RAM
 
 2. Software  
-   - Homebrew installed.  
-   - Docker Desktop for Mac installed and running (for Qdrant).  
-   - Python 3 (system or from python.org).
+   - Homebrew installed
+   - Docker Desktop for Mac installed and running (for Qdrant)
+   - Python 3 (system or from python.org)
 
 ---
 
@@ -48,7 +79,7 @@ sudo systemsetup -getremotelogin
 # Should print: Remote Login: On
 ```
 
-(If it complains about Full Disk Access, enable **Remote Login** once in System Settings → General → Sharing.)
+(If it complains about Full Disk Access, enable **Remote Login** once in System Settings > General > Sharing.)
 
 ---
 
@@ -250,14 +281,14 @@ python rag.py --ask "Explain different bases of social power and how they affect
 
 To use this RAG from other devices (Windows laptop, iPad, iPhone), expose it as a small HTTP API running on the macOS and keep it running in the background.
 
-### 10.1 Install FastAPI and Uvicorn
+### 10.1 Install Dependencies
 
 From the project root:
 
 ```bash
 cd ~/projects/llm-rag
 source .venv/bin/activate
-python -m pip install fastapi uvicorn
+python -m pip install fastapi uvicorn jinja2 python-multipart qdrant-client ollama httpx pydantic
 ```
 
 ### 10.2 Create the API server (`api_server.py`)
@@ -266,10 +297,7 @@ Create `api_server.py` in the project root:
 
 ```bash
 cat > api_server.py << 'EOF'
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-from rag import search, build_prompt, ollama_chat
+from fastapi import FastAPI, Request, Form
 ...
 EOF
 ```
@@ -315,11 +343,11 @@ You can now start the server manually with:
 ./run_api_server.sh
 ```
 
-### 10.4 macOS launchd service (auto‑start on login)
+### 10.4 macOS launchd service (auto-start on login)
 
 macOS uses `launchd` instead of systemd to run background services.
 
-Create `~/Library/LaunchAgents/com.llmrag.api.plist`:
+Create `~/Library/LaunchAgents/com.localragtext.api.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -328,7 +356,7 @@ Create `~/Library/LaunchAgents/com.llmrag.api.plist`:
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>com.llmrag.api</string>
+    <string>com.localragtext.api</string>
     ...
   </dict>
 </plist>
@@ -337,21 +365,24 @@ Create `~/Library/LaunchAgents/com.llmrag.api.plist`:
 Load and start the agent:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.llmrag.api.plist
-launchctl start com.llmrag.api
+launchctl load ~/Library/LaunchAgents/com.localragtext.api.plist
+launchctl start com.localragtext.api
+launchctl list | grep com.localragtext.api # displays the PID (Process ID) of the job if it is running
 ```
+
+---
 
 The API server will now:
 
 - Start automatically when you log into the Mac.
 - Restart if it exits unexpectedly.
-- Listen on `http://<mac-os-ip>:8000/rag` for POST requests from any device on your network.
+- Listen on `http://<Mac-Ip>:8000/rag` for POST requests from any device on your network.
 
-This turns your purpose‑built, goal‑aligned RAG into a small, always‑on service you can reach from other devices (Windows, iPad, or iPhone), not drifting into a noisy, generic, ever‑changing news feed.
+This turns your purpose-built, goal-aligned RAG into a small, always-on service you can reach from other devices (Windows, iPad, or iPhone), not drifting into a generic, noisy, ever-changing news feed.
 
 ---
 
-Online Public Resources:
+Online Public Resources (OER):
 
 - https://openstax.org/
 - https://open.umn.edu/

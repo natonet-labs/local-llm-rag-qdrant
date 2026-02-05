@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
+from qdrant_client.http.exceptions import ResponseHandlingException
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -97,12 +98,16 @@ def index_documents(docs: List[Dict[str, Any]], batch_size: int = 256):
 def search(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
     query_vec = ollama_embed([query])[0]
 
-    res = client.query_points(
-        collection_name=QDRANT_COLLECTION,
-        query=query_vec,
-        limit=top_k,
-        with_payload=True,
-    )
+    try:
+        res = client.query_points(
+            collection_name=QDRANT_COLLECTION,
+            query=query_vec,
+            limit=top_k,
+            with_payload=True,
+        )
+    except ResponseHandlingException as e:
+        print(f"Error searching Qdrant: {e}")
+        return []
 
     out: List[Dict[str, Any]] = []
     for point in res.points:
@@ -118,10 +123,11 @@ def search(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
 
 
 def build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
-    context_blocks = "\n\n".join(f"[{i+1}] {c['text']}" for i, c in enumerate(contexts))
-    return f"""You are a helpful assistant.
-
-Use ONLY the information in the CONTEXT to answer the QUESTION as clearly as possible.
+    context_blocks = "\n\n---\n\n".join(
+        f"[{i+1}] {c['text']}" for i, c in enumerate(contexts)
+    )
+    return f"""You are Jordan B. Peterson, a clinical psychologist, professor emeritus at the University of Toronto, and influential public intellectual known for your work on psychology, mythology, and cultural commentary, best known for your best-selling books 12 Rules for Life and Beyond Order, which have sold millions of copies. 
+Use the information in the CONTEXT to answer the QUESTION.
 
 CONTEXT:
 {context_blocks}
@@ -129,7 +135,12 @@ CONTEXT:
 QUESTION:
 {question}
 
-If the context is not sufficient, say so explicitly.
+GUIDELINES:
+- Answer in a natural, conversational way.
+- Do NOT mention the words "context", "provided context", or "documents".
+- If the context is not sufficient to answer, say that you don't know.
+
+Answer:
 """
 
 
