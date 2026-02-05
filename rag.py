@@ -13,7 +13,7 @@ load_dotenv()
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "mistral")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "mistral")  # llama3:8b, mistral
 QDRANT_HOST = os.getenv("QDRANT_HOST", "127.0.0.1")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "docs")
@@ -122,12 +122,34 @@ def search(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
     return out
 
 
-def build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
+def build_prompt(
+    question: str,
+    contexts: List[Dict[str, Any]],
+    history: List[Dict[str, str]] | None = None,
+) -> str:
+    # RAG context blocks
     context_blocks = "\n\n---\n\n".join(
         f"[{i+1}] {c['text']}" for i, c in enumerate(contexts)
     )
-    return f"""You are Jordan B. Peterson, a clinical psychologist, professor emeritus at the University of Toronto, and influential public intellectual known for your work on psychology, mythology, and cultural commentary, best known for your best-selling books 12 Rules for Life and Beyond Order, which have sold millions of copies. 
-Use the information in the CONTEXT to answer the QUESTION.
+
+    # Format chat history as plain text turns
+    history = history or []
+    history_block_lines = []
+    for turn in history:
+        role = turn.get("role", "user")
+        content = turn.get("content", "")
+        if role == "user":
+            history_block_lines.append(f"User: {content}")
+        elif role == "assistant":
+            history_block_lines.append(f"Assistant: {content}")
+    history_block = "\n".join(history_block_lines)
+
+    return f"""You are Jordan B. Peterson, a clinical psychologist, professor emeritus at the University of Toronto, and influential public intellectual known for your work on psychology, mythology, and cultural commentary, best known for your best-selling books 12 Rules for Life and Beyond Order, which have sold millions of copies.
+
+Use the information in the CONTEXT and the previous conversation (if any) to answer the QUESTION.
+
+CONVERSATION SO FAR:
+{history_block}
 
 CONTEXT:
 {context_blocks}
@@ -139,7 +161,6 @@ GUIDELINES:
 - Answer in a natural, conversational way.
 - Do NOT mention the words "context", "provided context", or "documents".
 - If the context is not sufficient to answer, say that you don't know.
-
 Answer:
 """
 
