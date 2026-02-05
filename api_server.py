@@ -1,4 +1,7 @@
-# api_server.py
+"""
+API server for RAG chat application using FastAPI.
+How to pull models: from models import RAGRequest, RAGResponse
+"""
 
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
