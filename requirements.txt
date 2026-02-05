@@ -1,0 +1,13 @@
+beautifulsoup4
+fastapi
+httpx
+itsdangerous
+jinja2
+lxml
+ollama
+pypdf
+python-multipart
+qdrant-client
+pydantic
+python-dotenv
+uvicorn

@@ -153,7 +153,7 @@ docker ps
 ```bash
 mkdir -p ~/projects/local-rag-text
 cd ~/projects/local-rag-text
-python3 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install beautifulsoup4 fastapi httpx jinja2 lxml ollama pypdf python-multipart qdrant-client  pydantic python-dotenv uvicorn
@@ -357,8 +357,10 @@ Load and start the agent:
 
 ```bash
 launchctl load ~/Library/LaunchAgents/com.localragtext.api.plist
+launchctl stop com.localragtext.api
 launchctl start com.localragtext.api
-launchctl list | grep com.localragtext.api # displays the PID (Process ID) of the job if it is running
+# displays the PID (Process ID) of the job if it is running
+launchctl list | grep com.localragtext.api
 ```
 
 ---
