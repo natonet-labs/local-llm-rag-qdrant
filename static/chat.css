@@ -34,13 +34,15 @@ h1 {
 }
 
 .msg-user {
-  font-weight: 600;
+  font-style: italic;
   color: #111827;
+  margin-bottom: 10px;
 }
 
 .msg-bot {
   margin-top: 2px;
   color: #111827;
+  line-height: 1.5;
 }
 
 .msg small {
@@ -56,13 +58,13 @@ h1 {
 
 .chat-input {
   width: 100%;
-  font-size: 17px;
+  font-size: 16px;
   padding: 10px;
   border-radius: 10px;
   border: 1px solid #d1d5db;
   box-sizing: border-box;
   resize: vertical;
-  min-height: 60px;
+  min-height: 100px;
 }
 
 .chat-button {
