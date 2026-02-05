@@ -1,12 +1,12 @@
 # Local LLM + RAG + Qdrant on a Mac (mini M4)
 
-This is a textbook local RAG pipeline. Ollama runs the pre???trained Mistral model, Qdrant holds vectors for the PDFs, and the app glues them together so Mistral can answer questions grounded in those open-education documents.
+This is a textbook local RAG pipeline. Ollama runs the pre-trained Mistral model, Qdrant holds vectors for the PDFs, and the app glues them together so Mistral can answer questions grounded in those open-education documents.
 
 How this setup maps to "proper" RAG:
-- You ingest PDFs, chunk them, embed each chunk, and store those embeddings + text in Qdrant???this is the retrieval index.
-- On a question, you embed the query, ask Qdrant for nearest chunks, then send ???context chunks + user question??? to Mistral via Ollama.
+- You ingest PDFs, chunk them, embed each chunk, and store those embeddings + text in Qdrant, this is the retrieval index.
+- On a question, you embed the query, ask Qdrant for nearest chunks, then send **context chunks + user question** to Mistral via Ollama.
 - Mistral itself stays frozen; it just "reads" the retrieved PDF snippets in the prompt and synthesizes an answer, which is exactly how RAG is described in Qdrant/Ollama examples.
-???
+
 You are giving your local engine a searchable memory (Qdrant) of those PDFs and letting it reason over that supplemental data at query time.
 
 ---
@@ -60,12 +60,12 @@ graph TD
 ## 1. Prerequisites
 
 1. Hardware  
-   - Mac with 32 GB RAM.
+   - Mac with 32 GB RAM
 
 2. Software  
-   - Homebrew installed.  
-   - Docker Desktop for Mac installed and running (for Qdrant).  
-   - Python 3 (system or from python.org).
+   - Homebrew installed
+   - Docker Desktop for Mac installed and running (for Qdrant)
+   - Python 3 (system or from python.org)
 
 ---
 
@@ -79,7 +79,7 @@ sudo systemsetup -getremotelogin
 # Should print: Remote Login: On
 ```
 
-(If it complains about Full Disk Access, enable **Remote Login** once in System Settings ??? General ??? Sharing.)
+(If it complains about Full Disk Access, enable **Remote Login** once in System Settings > General > Sharing.)
 
 ---
 
@@ -378,11 +378,11 @@ The API server will now:
 - Restart if it exits unexpectedly.
 - Listen on `http://<Mac-Ip>:8000/rag` for POST requests from any device on your network.
 
-This turns your purpose???built, goal???aligned RAG into a small, always???on service you can reach from other devices (Windows, iPad, or iPhone), not drifting into a noisy, generic, ever???changing news feed.
+This turns your purpose-built, goal-aligned RAG into a small, always-on service you can reach from other devices (Windows, iPad, or iPhone), not drifting into a generic, noisy, ever-changing news feed.
 
 ---
 
-Online Public Resources:
+Online Public Resources (OER):
 
 - https://openstax.org/
 - https://open.umn.edu/
