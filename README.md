@@ -148,15 +148,16 @@ docker ps
 
 ---
 
-## 6. Create project structure
+## 6. Create virtual environment and install dependencies
 
 ```bash
-mkdir -p ~/projects/llm-rag/{src,pdf}
-cd ~/projects/llm-rag
+mkdir -p ~/projects/local-rag-text
+cd ~/projects/local-rag-text
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install qdrant-client httpx python-dotenv beautifulsoup4 lxml pypdf
+python -m pip install beautifulsoup4 fastapi httpx jinja2 lxml ollama pypdf python-multipart qdrant-client  pydantic python-dotenv uvicorn
+
 ```
 
 Create `.env`:
@@ -255,7 +256,7 @@ chmod +x ingest_pdf.sh
 Usage:
 
 ```bash
-cd /path/to/my/projects/llm-rag
+cd /path/to/my/projects/local-rag-text
 ./ingest_pdf.sh
 # It will prompt: Enter PDF filename under pdf/:
 # e.g.: Principles_of_Social_Psychology.pdf
@@ -281,17 +282,7 @@ python rag.py --ask "Explain different bases of social power and how they affect
 
 To use this RAG from other devices (Windows laptop, iPad, iPhone), expose it as a small HTTP API running on the macOS and keep it running in the background.
 
-### 10.1 Install Dependencies
-
-From the project root:
-
-```bash
-cd ~/projects/llm-rag
-source .venv/bin/activate
-python -m pip install fastapi uvicorn jinja2 python-multipart qdrant-client ollama httpx pydantic
-```
-
-### 10.2 Create the API server (`api_server.py`)
+### 10.1 Create the API server (`api_server.py`)
 
 Create `api_server.py` in the project root:
 
@@ -319,7 +310,7 @@ curl -X POST "http://MAC_OS_IP:8000/rag" \
 
 You should receive a JSON response with `answer` and `contexts`.
 
-### 10.3 Shell script to run the API server
+### 10.2 Shell script to run the API server
 
 Create `run_api_server.sh`:
 
@@ -343,7 +334,7 @@ You can now start the server manually with:
 ./run_api_server.sh
 ```
 
-### 10.4 macOS launchd service (auto-start on login)
+### 10.3 macOS launchd service (auto-start on login)
 
 macOS uses `launchd` instead of systemd to run background services.
 
