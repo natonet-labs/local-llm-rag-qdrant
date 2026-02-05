@@ -12,16 +12,47 @@ You are giving your local engine a searchable memory (Qdrant) of those PDFs and 
 ---
 
 ```mermaid
-flowchart TD
-    A[User Question] --> B[Python RAG Script]
-    B --> C[Ollama<br/>Mistral Chat Model]
-    B --> D[Ollama<br/>Embedding Model]
-    B --> E[Qdrant<br/>Vector Database]
-    F[OER Sources<br/>Psychology 2e PDF<br/>Other OER] --> G[Ingestion Scripts]
-    G --> D
-    G --> E
-    E --> B
-    C --> B
+graph TD
+    %% Core metaphor
+    User[User<br/>&lpar;Driver&rpar;]
+    Ollama[Ollama<br/>&lpar;Car&rpar;]
+    Mistral[Mistral AI<br/>&lpar;Engine&rpar;]
+    RAG[RAG Pipeline<br/>&lpar;Fuel Injection / GPS&rpar;]
+
+    %% Storage & fuel metaphor
+    Embeds[Embedding Model<br/>&lpar;Refinery&rpar;]
+    Qdrant[Qdrant Vector DB<br/>&lpar;Gas Tank + Fuel Lines&rpar;]
+
+    %% Knowledge sources
+    OER[Open Educational<br/>Resources &lpar;OER&rpar;]
+    Docs[Documents & Notes]
+    Ingest[Ingestion<br/>Process]
+
+    %% Questions
+    Questions[User Questions]
+
+    %% Main flow
+    User -->|Asks question| Questions
+    Questions -->|Send to| Ollama
+    Ollama -->|Uses| Mistral
+    Ollama -->|Uses| RAG
+
+    %% RAG internals &lpar;fuel system&rpar;
+    RAG -->|Converts text to vectors| Embeds
+    Embeds -->|Stores refined fuel| Qdrant
+    Qdrant -->|Provides relevant fuel<br/>&lpar;chunks&rpar;| RAG
+
+    %% Data side &lpar;fuel creation&rpar;
+    OER --> Docs
+    Docs --> Ingest
+    Ingest -->|Clean & chunk| Docs
+    Ingest -->|Embed & store| Embeds
+    Ingest --> Qdrant
+
+    %% Answer back
+    RAG -->|Context + question| Mistral
+    Mistral -->|Generates answer| Ollama
+    Ollama -->|Returns answer| User
 ```
 
 ---
