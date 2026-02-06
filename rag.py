@@ -1,29 +1,44 @@
+# Standard library imports
+import argparse
 import os
-import math
-import json
-from typing import List, Dict, Any
+import uuid
+from collections import Counter
+from typing import Any, Dict, List, Optional
 
+# Third-party imports
 import httpx
-from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams, PointStruct
-from qdrant_client.http.exceptions import ResponseHandlingException
 from dotenv import load_dotenv
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+from qdrant_client.http.exceptions import ResponseHandlingException
+from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
+# Load environment variables
 load_dotenv()
+
+# ============================================================================
+# Configuration
+# ============================================================================
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "mistral")  # llama3:8b, mistral
+CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3:8b")  # llama3:8b, mistral
 QDRANT_HOST = os.getenv("QDRANT_HOST", "127.0.0.1")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "docs")
+MAX_CHAT_HISTORY = 12  # Max messages (6 turns: user/assistant pairs)
 
+# Initialize Qdrant client
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
-global_id = 0
+
+# ============================================================================
+# Ollama Integration (LLM & Embeddings)
+# ============================================================================
 
 
 def ollama_embed(texts: List[str]) -> List[List[float]]:
+    """Embed text using Ollama embedding model."""
     # For now, call embeddings one by one using "prompt"
     embeddings: List[List[float]] = []
     for t in texts:
@@ -40,6 +55,7 @@ def ollama_embed(texts: List[str]) -> List[List[float]]:
 
 
 def ollama_chat(prompt: str) -> str:
+    """Generate a response using Ollama chat model."""
     payload = {
         "model": CHAT_MODEL,
         "prompt": prompt,
@@ -51,7 +67,13 @@ def ollama_chat(prompt: str) -> str:
     return data.get("response", "")
 
 
+# ============================================================================
+# Qdrant Vector Database
+# ============================================================================
+
+
 def ensure_collection(vector_size: int):
+    """Create collection if it doesn't exist."""
     collections = client.get_collections()
     names = {c.name for c in collections.collections}
     if QDRANT_COLLECTION in names:
@@ -62,8 +84,30 @@ def ensure_collection(vector_size: int):
     )
 
 
+def document_exists(source_prefix: str) -> bool:
+    """Check if any points with this source prefix already exist."""
+    try:
+        points, _ = client.scroll(
+            collection_name=QDRANT_COLLECTION,
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception:
+        # Collection does not exist or other error → treat as no docs
+        return False
+
+    for p in points:
+        payload = p.payload or {}
+        doc_id = payload.get("doc_id", "")
+        if doc_id.startswith(f"{source_prefix}-p"):
+            return True
+
+    return False
+
+
 def index_documents(docs: List[Dict[str, Any]], batch_size: int = 256):
-    global global_id
+    """Embed documents and upsert into Qdrant collection in batches."""
     texts = [d["text"] for d in docs]
     embeddings = ollama_embed(texts)
     if not embeddings:
@@ -82,7 +126,7 @@ def index_documents(docs: List[Dict[str, Any]], batch_size: int = 256):
         for i in range(len(batch_docs)):
             points.append(
                 PointStruct(
-                    id=global_id,
+                    id=str(uuid.uuid4()),
                     vector=batch_embeddings[i],
                     payload={
                         "doc_id": batch_docs[i]["id"],
@@ -90,12 +134,79 @@ def index_documents(docs: List[Dict[str, Any]], batch_size: int = 256):
                     },
                 )
             )
-            global_id += 1
 
         client.upsert(collection_name=QDRANT_COLLECTION, points=points)
 
 
+def truncate_collection():
+    """⚠️  Safely truncate by deleting the collection; it will be recreated on first ingest."""
+    collection_name = QDRANT_COLLECTION
+
+    print(f"⚠️  About to DELETE collection '{collection_name}'...")
+
+    # If collection does not exist, just say so and return
+    try:
+        info = client.get_collection(collection_name)
+    except Exception:
+        print(f"  Collection '{collection_name}' does not exist. Nothing to delete.")
+        return
+
+    print(f"  Currently contains {info.points_count} points")
+
+    confirm = input("Type 'DELETE' to confirm (or Ctrl+C to cancel): ")
+    if confirm != "DELETE":
+        print("Aborted.")
+        return
+
+    client.delete_collection(collection_name)
+    print(f"🗑️  Deleted collection '{collection_name}'")
+    # No create_collection here; index_documents/ensure_collection will recreate it
+    print("✅ Collection will be recreated automatically on next ingest")
+
+
+def delete_by_source_prefix(source_prefix: str) -> int:
+    """Delete all points matching source_prefix-*. Returns count deleted."""
+    deleted_count = 0
+
+    while True:
+        # Scroll to find matching points
+        points, next_offset = client.scroll(
+            collection_name=QDRANT_COLLECTION,
+            limit=1000,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        ids_to_delete = []
+        for p in points:
+            payload = p.payload or {}
+            doc_id = payload.get("doc_id", "")
+            if doc_id.startswith(f"{source_prefix}-p"):
+                ids_to_delete.append(p.id)
+
+        if ids_to_delete:
+            client.delete(
+                collection_name=QDRANT_COLLECTION,
+                points_selector=models.PointIdsList(points=ids_to_delete),
+            )
+            deleted_count += len(ids_to_delete)
+            print(f"Deleted {len(ids_to_delete)} points for {source_prefix}")
+        else:
+            break
+
+        if next_offset is None:
+            break
+
+    return deleted_count
+
+
+# ============================================================================
+# Search & Retrieval
+# ============================================================================
+
+
 def search(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    """Search for relevant documents using semantic similarity."""
     query_vec = ollama_embed([query])[0]
 
     try:
@@ -122,6 +233,80 @@ def search(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
     return out
 
 
+def list_documents(
+    limit: int = 1000,
+    offset: Optional[int] = None,
+    verbose: bool = False,  # ← New flag
+) -> List[str]:
+    """Return logical document prefixes with chunk counts as formatted strings.
+
+    Args:
+        verbose: If True, print DEBUG scroll info during collection.
+    """
+    sources = Counter()
+
+    batch = 0
+    while True:
+        if verbose:
+            print(f"DEBUG scroll: batch={batch}, offset={offset}, limit={limit}")
+
+        points, next_offset = client.scroll(
+            collection_name=QDRANT_COLLECTION,
+            limit=limit,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        for p in points:
+            payload = p.payload or {}
+            doc_id = payload.get("doc_id")
+            if not doc_id:
+                continue
+            prefix = doc_id.split("-p", 1)[0]
+            if prefix:
+                sources[prefix] += 1
+
+        if next_offset is None:
+            break
+
+        offset = next_offset
+        batch += 1
+
+    # Format as "name (count chunks)" and sort
+    formatted = [f"{name} ({count} chunks)" for name, count in sorted(sources.items())]
+
+    # Print only if verbose (for --debug-info or manual debugging)
+    if verbose:
+        for line in formatted:
+            print(line)
+
+    return formatted
+
+
+def debug_collection_info() -> None:
+    """Print Qdrant collection metadata and a sample of doc_ids."""
+    info = client.get_collection(QDRANT_COLLECTION)
+    print(f"Collection '{QDRANT_COLLECTION}': {info.points_count} points")
+
+    # Sample a few points to see their doc_id prefixes
+    points, _ = client.scroll(
+        collection_name=QDRANT_COLLECTION,
+        limit=20,
+        with_payload=True,
+        with_vectors=False,
+    )
+    print("Sample doc_ids:")
+    for p in points:
+        payload = p.payload or {}
+        print("  ", payload.get("doc_id"))
+
+
+# ============================================================================
+# Prompt Construction & Chat
+# ============================================================================
+
+
 def build_prompt(
     question: str,
     contexts: List[Dict[str, Any]],
@@ -144,60 +329,141 @@ def build_prompt(
             history_block_lines.append(f"Assistant: {content}")
     history_block = "\n".join(history_block_lines)
 
-    return f"""You are Jordan B. Peterson, a clinical psychologist, professor emeritus at the University of Toronto, and influential public intellectual known for your work on psychology, mythology, and cultural commentary, best known for your best-selling books 12 Rules for Life and Beyond Order, which have sold millions of copies.
+    return f"""
+SYSTEM:
+You are an AI assistant who answers thoughtfully and psychologically, focusing on meaning, responsibility, and human behavior.
 
-Use the information in the CONTEXT and the previous conversation (if any) to answer the QUESTION.
+STYLE:
+- calm, reflective, and precise
+- grounded and practical
+- warm but professional
+- one-on-one conversational tone
 
-CONVERSATION SO FAR:
+TONE LOCK:
+- Write as if speaking to one thoughtful person.
+- Do not use lecture, sermon, or motivational-speaker language.
+- Do not address the user as a group (no "my friends," "folks," "everyone," etc.).
+- Avoid dramatic or grand statements.
+- Use clear, simple language; avoid rhetorical flourishes.
+
+TASK:
+Answer the user's question using retrieved information and conversation.
+
+RULES:
+- Follow these rules strictly.
+- Do not impersonate or claim to be any real person.
+- Use retrieved information as your main source.
+- You may reference books or biographical facts ONLY if they appear in retrieved text or conversation.
+- Do not invent details.
+- If information is missing or unsupported by retrieved text, say "I don't know" or "I may be mistaken."
+- Do not describe retrieval or sources.
+- Start answers directly. No "According to...", "From retrieved...", "Based on text...".
+- Internally plan your reasoning, but output only the final answer.
+- Keep answers concise (150-220 words unless asked for more).
+
+PRIORITY:
+1) Retrieved text
+2) Conversation history
+3) General knowledge (mark uncertainty)
+
+OUTPUT:
+- Natural conversational answer
+- 2-4 short paragraphs
+- Stay on topic
+- No rambling
+
+CONVERSATION:
 {history_block}
 
-CONTEXT:
+Use this information:
+
 {context_blocks}
 
-QUESTION:
 {question}
 
-GUIDELINES:
-- Answer in a natural, conversational way.
-- Do NOT mention the words "context", "provided context", or "documents".
-- If the context is not sufficient to answer, say that you don't know.
-Answer:
+Remember: stay one-on-one, plain, and professional.
+
+NEGATIVE CONSTRAINTS:
+- Do NOT use plural audience addresses such as "my friends," "folks," "everyone," etc.
+- Do NOT use motivational, inspirational, or lecture-style phrasing.
+- Do NOT use rhetorical fillers or transitional phrases like "As I see it," "You see," "Think about," "Here's the thing," "To illustrate this," "Well, it seems to me," "Now, I'm not saying," or "Of course."
+- Do NOT use hedging, softening qualifiers, or introductory phrases that mimic speech.
+- Do NOT use dramatic, evaluative, or emotional adjectives such as "fascinating," "profound," "crucial," or "important."
+- Do NOT use exclamation marks or any punctuation that adds emphasis or excitement.
+- Do NOT invite the user to reflect, imagine, or provide personal examples.
+- Do NOT start sentences with phrases that mimic a speech or lecture.
+- Keep all sentences plain and direct; avoid rhetorical flourishes or drama.
+- After composing each sentence, check that it complies with all NEGATIVE CONSTRAINTS. Rewrite if necessary.
+- If any of these rules are violated, immediately rewrite the response in a plain, direct, one-on-one tone without rhetoric, drama, or exclamation.
+
+EXAMPLES:
+Q: What is groupthink? A: Groupthink happens when groups prioritize agreement over accuracy.
+
+Q: How does knowledge affect behavior? A: Knowledge spreads through informational influence in groups.
+
+Always answer like these. No questions back.
+
+ANSWER:
 """
 
 
-def main():
-    import argparse
+# ============================================================================
+# Main CLI
+# ============================================================================
 
+
+def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--index", action="store_true", help="Index example documents then exit"
-    )
     parser.add_argument("--ask", type=str, help="Ask a question over indexed documents")
+    parser.add_argument(
+        "--list-docs",
+        action="store_true",
+        help="List logical document sources stored in Qdrant",
+    )
+    parser.add_argument(
+        "--truncate",
+        action="store_true",
+        help="Delete all documents from Qdrant (requires confirmation)",
+    )
+    parser.add_argument(
+        "--debug-info",
+        action="store_true",
+        help="Show Qdrant collection point count and sample doc_ids",
+    )
+    parser.add_argument("--chat", action="store_true", help="Interactive chat mode")
     args = parser.parse_args()
 
-    if args.index:
-        docs = [
-            {
-                "id": "doc1",
-                "text": "The NVIDIA Jetson Orin Nano Super Developer Kit is a small edge AI computer with an NVIDIA GPU and 8GB unified memory.",
-            },
-            {
-                "id": "doc2",
-                "text": "The Apple Mac mini M4 with 32GB unified memory is well suited for running local language models like Mistral or Llama for RAG workloads.",
-            },
-            {
-                "id": "doc3",
-                "text": "RAG (Retrieval-Augmented Generation) combines document search using embeddings and a vector database with a language model to answer questions based on your data.",
-            },
-        ]
-        index_documents(docs)
-        print(f"Indexed {len(docs)} docs into collection '{QDRANT_COLLECTION}'.")
+    if args.chat:
+        history = []
+
+        while True:
+            try:
+                question = input("\nYou: ").strip()
+                if question.lower() in ["exit", "quit", "bye"]:
+                    break
+
+                hits = search(question, top_k=3)
+                if not hits:
+                    print("No relevant docs found.")
+                    continue
+
+                prompt = build_prompt(question, hits, history)
+                answer = ollama_chat(prompt)
+                print(f"\n🤖 {answer}")
+
+                history.append({"role": "user", "content": question})
+                history.append({"role": "assistant", "content": answer})
+                if len(history) > MAX_CHAT_HISTORY:
+                    history = history[-MAX_CHAT_HISTORY:]
+
+            except KeyboardInterrupt:
+                break
         return
 
     if args.ask:
         hits = search(args.ask, top_k=3)
         if not hits:
-            print("No results from vector search.")
+            print("No relevant docs found.")
             return
         prompt = build_prompt(args.ask, hits)
         answer = ollama_chat(prompt)
@@ -206,6 +472,20 @@ def main():
             print(f"[score={h['score']:.3f}] {h['doc_id']}: {h['text'][:160]}...")
         print("\n--- ANSWER ---")
         print(answer)
+        return
+
+    if args.list_docs:
+        files = list_documents(verbose=False)
+        for name in files:
+            print(name)
+        return
+
+    if args.truncate:
+        truncate_collection()
+        return
+
+    if args.debug_info:
+        debug_collection_info()
         return
 
     parser.print_help()
