@@ -1,15 +1,24 @@
+# Standard library imports
+import argparse
 import os
-import math
-import json
-from typing import List, Dict, Any
+import uuid
+from collections import Counter
+from typing import Any, Dict, List, Optional
 
+# Third-party imports
 import httpx
-from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams, PointStruct
-from qdrant_client.http.exceptions import ResponseHandlingException
 from dotenv import load_dotenv
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+from qdrant_client.http.exceptions import ResponseHandlingException
+from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
+# Load environment variables
 load_dotenv()
+
+# ============================================================================
+# Configuration
+# ============================================================================
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
@@ -18,12 +27,17 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "127.0.0.1")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "docs")
 
+# Initialize Qdrant client
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
-global_id = 0
+
+# ============================================================================
+# Ollama Integration (LLM & Embeddings)
+# ============================================================================
 
 
 def ollama_embed(texts: List[str]) -> List[List[float]]:
+    """Embed text using Ollama embedding model."""
     # For now, call embeddings one by one using "prompt"
     embeddings: List[List[float]] = []
     for t in texts:
@@ -40,6 +54,7 @@ def ollama_embed(texts: List[str]) -> List[List[float]]:
 
 
 def ollama_chat(prompt: str) -> str:
+    """Generate a response using Ollama chat model."""
     payload = {
         "model": CHAT_MODEL,
         "prompt": prompt,
@@ -51,7 +66,13 @@ def ollama_chat(prompt: str) -> str:
     return data.get("response", "")
 
 
+# ============================================================================
+# Qdrant Vector Database
+# ============================================================================
+
+
 def ensure_collection(vector_size: int):
+    """Create collection if it doesn't exist."""
     collections = client.get_collections()
     names = {c.name for c in collections.collections}
     if QDRANT_COLLECTION in names:
@@ -62,8 +83,30 @@ def ensure_collection(vector_size: int):
     )
 
 
+def document_exists(source_prefix: str) -> bool:
+    """Check if any points with this source prefix already exist."""
+    try:
+        points, _ = client.scroll(
+            collection_name=QDRANT_COLLECTION,
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception:
+        # Collection does not exist or other error → treat as no docs
+        return False
+
+    for p in points:
+        payload = p.payload or {}
+        doc_id = payload.get("doc_id", "")
+        if doc_id.startswith(f"{source_prefix}-p"):
+            return True
+
+    return False
+
+
 def index_documents(docs: List[Dict[str, Any]], batch_size: int = 256):
-    global global_id
+    """Embed documents and upsert into Qdrant collection in batches."""
     texts = [d["text"] for d in docs]
     embeddings = ollama_embed(texts)
     if not embeddings:
@@ -82,7 +125,7 @@ def index_documents(docs: List[Dict[str, Any]], batch_size: int = 256):
         for i in range(len(batch_docs)):
             points.append(
                 PointStruct(
-                    id=global_id,
+                    id=str(uuid.uuid4()),
                     vector=batch_embeddings[i],
                     payload={
                         "doc_id": batch_docs[i]["id"],
@@ -90,12 +133,79 @@ def index_documents(docs: List[Dict[str, Any]], batch_size: int = 256):
                     },
                 )
             )
-            global_id += 1
 
         client.upsert(collection_name=QDRANT_COLLECTION, points=points)
 
 
+def truncate_collection():
+    """⚠️  Safely truncate by deleting the collection; it will be recreated on first ingest."""
+    collection_name = QDRANT_COLLECTION
+
+    print(f"⚠️  About to DELETE collection '{collection_name}'...")
+
+    # If collection does not exist, just say so and return
+    try:
+        info = client.get_collection(collection_name)
+    except Exception:
+        print(f"  Collection '{collection_name}' does not exist. Nothing to delete.")
+        return
+
+    print(f"  Currently contains {info.points_count} points")
+
+    confirm = input("Type 'DELETE' to confirm (or Ctrl+C to cancel): ")
+    if confirm != "DELETE":
+        print("Aborted.")
+        return
+
+    client.delete_collection(collection_name)
+    print(f"🗑️  Deleted collection '{collection_name}'")
+    # No create_collection here; index_documents/ensure_collection will recreate it
+    print("✅ Collection will be recreated automatically on next ingest")
+
+
+def delete_by_source_prefix(source_prefix: str) -> int:
+    """Delete all points matching source_prefix-*. Returns count deleted."""
+    deleted_count = 0
+
+    while True:
+        # Scroll to find matching points
+        points, next_offset = client.scroll(
+            collection_name=QDRANT_COLLECTION,
+            limit=1000,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        ids_to_delete = []
+        for p in points:
+            payload = p.payload or {}
+            doc_id = payload.get("doc_id", "")
+            if doc_id.startswith(f"{source_prefix}-p"):
+                ids_to_delete.append(p.id)
+
+        if ids_to_delete:
+            client.delete(
+                collection_name=QDRANT_COLLECTION,
+                points_selector=models.PointIdsList(points=ids_to_delete),
+            )
+            deleted_count += len(ids_to_delete)
+            print(f"Deleted {len(ids_to_delete)} points for {source_prefix}")
+        else:
+            break
+
+        if next_offset is None:
+            break
+
+    return deleted_count
+
+
+# ============================================================================
+# Search & Retrieval
+# ============================================================================
+
+
 def search(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    """Search for relevant documents using semantic similarity."""
     query_vec = ollama_embed([query])[0]
 
     try:
@@ -120,6 +230,80 @@ def search(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
             }
         )
     return out
+
+
+def list_documents(
+    limit: int = 1000,
+    offset: Optional[int] = None,
+    verbose: bool = False,  # ← New flag
+) -> List[str]:
+    """Return logical document prefixes with chunk counts as formatted strings.
+
+    Args:
+        verbose: If True, print DEBUG scroll info during collection.
+    """
+    sources = Counter()
+
+    batch = 0
+    while True:
+        if verbose:
+            print(f"DEBUG scroll: batch={batch}, offset={offset}, limit={limit}")
+
+        points, next_offset = client.scroll(
+            collection_name=QDRANT_COLLECTION,
+            limit=limit,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        for p in points:
+            payload = p.payload or {}
+            doc_id = payload.get("doc_id")
+            if not doc_id:
+                continue
+            prefix = doc_id.split("-p", 1)[0]
+            if prefix:
+                sources[prefix] += 1
+
+        if next_offset is None:
+            break
+
+        offset = next_offset
+        batch += 1
+
+    # Format as "name (count chunks)" and sort
+    formatted = [f"{name} ({count} chunks)" for name, count in sorted(sources.items())]
+
+    # Print only if verbose (for --debug-info or manual debugging)
+    if verbose:
+        for line in formatted:
+            print(line)
+
+    return formatted
+
+
+def debug_collection_info() -> None:
+    """Print Qdrant collection metadata and a sample of doc_ids."""
+    info = client.get_collection(QDRANT_COLLECTION)
+    print(f"Collection '{QDRANT_COLLECTION}': {info.points_count} points")
+
+    # Sample a few points to see their doc_id prefixes
+    points, _ = client.scroll(
+        collection_name=QDRANT_COLLECTION,
+        limit=20,
+        with_payload=True,
+        with_vectors=False,
+    )
+    print("Sample doc_ids:")
+    for p in points:
+        payload = p.payload or {}
+        print("  ", payload.get("doc_id"))
+
+
+# ============================================================================
+# Prompt Construction & Chat
+# ============================================================================
 
 
 def build_prompt(
@@ -165,34 +349,30 @@ Answer:
 """
 
 
+# ============================================================================
+# Main CLI
+# ============================================================================
+
+
 def main():
-    import argparse
-
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--index", action="store_true", help="Index example documents then exit"
-    )
     parser.add_argument("--ask", type=str, help="Ask a question over indexed documents")
+    parser.add_argument(
+        "--list-docs",
+        action="store_true",
+        help="List logical document sources stored in Qdrant",
+    )
+    parser.add_argument(
+        "--truncate",
+        action="store_true",
+        help="Delete all documents from Qdrant (requires confirmation)",
+    )
+    parser.add_argument(
+        "--debug-info",
+        action="store_true",
+        help="Show Qdrant collection point count and sample doc_ids",
+    )
     args = parser.parse_args()
-
-    if args.index:
-        docs = [
-            {
-                "id": "doc1",
-                "text": "The NVIDIA Jetson Orin Nano Super Developer Kit is a small edge AI computer with an NVIDIA GPU and 8GB unified memory.",
-            },
-            {
-                "id": "doc2",
-                "text": "The Apple Mac mini M4 with 32GB unified memory is well suited for running local language models like Mistral or Llama for RAG workloads.",
-            },
-            {
-                "id": "doc3",
-                "text": "RAG (Retrieval-Augmented Generation) combines document search using embeddings and a vector database with a language model to answer questions based on your data.",
-            },
-        ]
-        index_documents(docs)
-        print(f"Indexed {len(docs)} docs into collection '{QDRANT_COLLECTION}'.")
-        return
 
     if args.ask:
         hits = search(args.ask, top_k=3)
@@ -206,6 +386,20 @@ def main():
             print(f"[score={h['score']:.3f}] {h['doc_id']}: {h['text'][:160]}...")
         print("\n--- ANSWER ---")
         print(answer)
+        return
+
+    if args.list_docs:
+        files = list_documents(verbose=False)
+        for name in files:
+            print(name)
+        return
+
+    if args.truncate:
+        truncate_collection()
+        return
+
+    if args.debug_info:
+        debug_collection_info()
         return
 
     parser.print_help()

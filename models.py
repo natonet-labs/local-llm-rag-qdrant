@@ -1,4 +1,3 @@
-# How to pull models: from models import RAGRequest, RAGResponse
 from pydantic import BaseModel
 from typing import Optional
 

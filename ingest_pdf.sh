@@ -1,24 +1,52 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$PROJECT_DIR"
+# ============================================================================
+# Configuration
+# ============================================================================
 
-# Ask for PDF filename (relative to pdf/)
-read -rp "Enter PDF filename under pdf/ (e.g., Psychology2e.pdf): " PDF_NAME
-
-PDF_PATH="pdf/$PDF_NAME"
-
-if [[ ! -f "$PDF_PATH" ]]; then
-  echo "File not found: $PDF_PATH"
-  exit 1
+FORCE=${1:-}  # ./ingest_pdf.sh --force
+FORCE_ARG=""
+if [[ "$FORCE" == "--force" ]]; then
+    FORCE_ARG="--force"
 fi
 
-# Derive a simple source prefix from filename (strip extension)
-SOURCE_PREFIX="${PDF_NAME%.*}"
+PROJECTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECTDIR"
 
-# Activate venv
+# ============================================================================
+# Setup
+# ============================================================================
+
 source .venv/bin/activate
 
-echo "Ingesting $PDF_PATH with source prefix '$SOURCE_PREFIX'..."
-python ingest_pdf.py --pdf "$PDF_PATH" --source-prefix "$SOURCE_PREFIX"
+# ============================================================================
+# Process PDFs
+# ============================================================================
+
+# Auto-process ALL .pdf files in pdf/ folder
+PDF_FILES=(pdf/*.pdf)
+
+if [[ ${#PDF_FILES[@]} -eq 0 ]]; then
+    echo "No PDF files found in pdf/ folder."
+    exit 1
+fi
+
+echo "Found ${#PDF_FILES[@]} PDF files. Processing..."
+for PDF_PATH in "${PDF_FILES[@]}"; do
+    PDF_NAME=$(basename "$PDF_PATH" .pdf)
+    SOURCE_PREFIX="$PDF_NAME"
+    
+    echo ""
+    echo "=== Processing $PDF_PATH (prefix: $SOURCE_PREFIX) ==="
+    
+    # ingest_pdf.py already handles dedupe via document_exists()
+    python ingest_pdf.py $FORCE_ARG --pdf "$PDF_PATH" --source-prefix "$SOURCE_PREFIX"
+done
+
+echo ""
+echo "✅ Batch ingestion complete!"
+echo ""
+echo "Next steps:"
+echo "  View results:  python rag.py --list-docs"
+echo "  Ask a question: python rag.py --ask 'Your question here'"
