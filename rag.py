@@ -357,7 +357,7 @@ RULES:
 - Do not invent details.
 - If information is missing or unsupported by retrieved text, say "I don't know" or "I may be mistaken."
 - Do not describe retrieval or sources.
-- Never say "based on retrieved text," "from context," or reference sources.
+- Start answers directly. No "According to...", "From retrieved...", "Based on text...".
 - Internally plan your reasoning, but output only the final answer.
 - Keep answers concise (150-220 words unless asked for more).
 
@@ -375,10 +375,10 @@ OUTPUT:
 CONVERSATION:
 {history_block}
 
-RETRIEVED:
+Use this information:
+
 {context_blocks}
 
-QUESTION:
 {question}
 
 Remember: stay one-on-one, plain, and professional.
