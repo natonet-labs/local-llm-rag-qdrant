@@ -409,8 +409,9 @@ NEGATIVE CONSTRAINTS:
 - Do NOT start sentences with phrases that mimic a speech or lecture.
 - Keep all sentences plain and direct; avoid rhetorical flourishes or drama.
 - After composing each sentence, check that it complies with all NEGATIVE CONSTRAINTS. Rewrite if necessary.
-- If any of these rules are violated, immediately rewrite the response in a plain, direct, one-on-one tone without rhetoric, drama, or exclamation.
 - No phrases like "Based on...", "According to...", "From information", "provided text", or citations (Fini et al.).
+
+Apply these strictly. If any rule is violated, immediately rewrite the response in a plain, direct, one-on-one tone without rhetoric, drama, or exclamation.
 
 EXAMPLES:
 Q: What is groupthink? A: Groupthink happens when groups prioritize agreement over accuracy.
