@@ -61,10 +61,11 @@ def ollama_chat(prompt: str) -> str:
         "prompt": prompt,
         "stream": False,
         "options": {
-            "temperature": 0.4,
-            "repeat_penalty": 1.3,
+            "temperature": 0.5,
+            "repeat_penalty": 1.2,
             "top_p": 0.9,
             "top_k": 40,
+            "num_ctx": 2048,  # Reduced from default 4096 for faster attention
         },
     }
     r = httpx.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=120.0)

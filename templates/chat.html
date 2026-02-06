@@ -1,138 +1,166 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>AI Chatbot</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <!-- Bootstrap CSS from CDN -->
-  <link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-    integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
-    crossorigin="anonymous"
-  >
+    <meta charset="UTF-8">
+    <title>AI Chatbot</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Bootstrap CSS from CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="/static/chat.css">
 </head>
 <body class="bg-light">
-  <div class="container py-3 py-md-4">
-    <div class="row justify-content-center">
-      <div class="col-12 col-md-10 col-lg-8">
+    <div class="container py-3 py-md-4">
+        <div class="row justify-content-center">
+            <div class="col-12 col-md-10 col-lg-8">
+                <h1 class="h4 text-center mb-3">Ask Me Anything</h1>
+                
+                <div class="card shadow-sm" id="content-wrapper">
+                    <div class="card-body d-flex flex-column" style="min-height: 60vh;">
+                        <div id="messages" class="flex-grow-1 mb-3 overflow-auto">
+                            <!-- Messages will be appended here dynamically -->
+                        </div>
 
-        <h1 class="h4 text-center mb-3">Ask Me Anything</h1>
-
-        <div class="card shadow-sm">
-          <div class="card-body d-flex flex-column" style="min-height: 60vh;">
-            <div id="messages" class="flex-grow-1 mb-3 overflow-auto">
-              <!-- existing messages rendered by server, if any -->
-              {% if question and answer %}
-              <div class="mb-3">
-                <div class="fw-semibold text-primary mb-1">You</div>
-                <div class="p-2 rounded bg-light border">
-                  {{ question }}
+                        <form id="chat-form" class="mt-auto">
+                            <div class="mb-2">
+                                <textarea 
+                                    id="question-input" 
+                                    name="question" 
+                                    class="form-control" 
+                                    rows="3" 
+                                    placeholder="Ask anything..."></textarea>
+                            </div>
+                            <div class="d-flex justify-content-end">
+                                <button type="submit" class="btn btn-primary" id="send-button">
+                                    Send
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
-              </div>
-
-              <div class="mb-3">
-                <div class="fw-semibold text-success mb-1">Assistant</div>
-                <div class="p-2 rounded bg-white border">
-                  {{ answer }}
-                </div>
-              </div>
-              {% endif %}
             </div>
-
-            <form id="chat-form" class="mt-auto">
-              <div class="mb-2">
-                <textarea
-                  id="question-input"
-                  name="question"
-                  class="form-control"
-                  rows="3"
-                  placeholder="Ask anything…"
-                ></textarea>
-              </div>
-              <div class="d-flex justify-content-end">
-                <button
-                  type="submit"
-                  class="btn btn-primary"
-                  id="send-button"
-                >
-                  Send
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
-
-      </div>
     </div>
-  </div>
 
-  <script>
-    const form = document.getElementById('chat-form');
-    const textarea = document.getElementById('question-input');
-    const button = document.getElementById('send-button');
-    const messagesDiv = document.getElementById('messages');
+    <script>
+      const form = document.getElementById('chat-form');
+      const textarea = document.getElementById('question-input');
+      const button = document.getElementById('send-button');
+      const messagesDiv = document.getElementById('messages');
 
-    async function sendQuestion(text) {
-      if (!text.trim()) return;
+      async function sendQuestion(text) {
+        if (!text.trim()) return;
 
-      // Disable button + show "Sending…"
-      button.disabled = true;
-      button.textContent = 'Sending…';
-      button.classList.add('disabled');
+        // Disable button immediately
+        button.disabled = true;
+        button.textContent = 'Sending...';
+        button.classList.add('disabled');
 
-      try {
-        const resp = await fetch('/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({ question: text })
-        });
-
-        const html = await resp.text();
-
-        // Replace the messages area from the returned HTML
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        const newMessages = doc.getElementById('messages');
-        if (newMessages && messagesDiv) {
-          messagesDiv.innerHTML = newMessages.innerHTML;
-          messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-
-        // Clear input
+        // Clear input immediately for better UX
         textarea.value = '';
-      } catch (err) {
-        console.error('Error sending question', err);
-      } finally {
-        button.disabled = false;
-        button.textContent = 'Send';
-        button.classList.remove('disabled');
-      }
+
+        // Add user message
+        const userDiv = document.createElement('div');
+        userDiv.className = 'mb-3';
+        userDiv.innerHTML = `
+            <div class="fw-semibold text-primary mb-1">You</div>
+            <div class="p-2 rounded bg-light border">${escapeHtml(text)}</div>
+        `;
+        messagesDiv.appendChild(userDiv);
+        
+        // Scroll to user message
+        scrollToBottom();
+
+        // Create unique assistant message container
+        const assistantDiv = document.createElement('div');
+        assistantDiv.className = 'mb-3';
+        const answerContainerId = 'answer-' + Date.now();
+        assistantDiv.innerHTML = `
+            <div class="fw-semibold text-success mb-1">Assistant</div>
+            <div class="p-2 rounded bg-white border" id="${answerContainerId}"></div>
+        `;
+        messagesDiv.appendChild(assistantDiv);
+        
+        const answerDiv = document.getElementById(answerContainerId);
+        
+        // Scroll to new assistant container
+        scrollToBottom();
+
+        try {
+            const resp = await fetch('/chat/stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ question: text })
+            });
+
+            if (!resp.ok) {
+                throw new Error('Network response was not ok');
+            }
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let tokenCount = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const token = decoder.decode(value, { stream: true });
+                answerDiv.textContent += token;
+                
+                // Scroll every few tokens to keep response visible during streaming
+                tokenCount++;
+                if (tokenCount % 5 === 0) {
+                    scrollToBottom();
+                }
+            }
+            
+            // Final scroll after completion
+            scrollToBottom();
+
+        } catch (err) {
+            console.error('Error sending question:', err);
+            answerDiv.textContent = 'Error: Could not connect to server.';
+            answerDiv.classList.add('text-danger');
+            scrollToBottom();
+        } finally {
+            button.disabled = false;
+            button.textContent = 'Send';
+            button.classList.remove('disabled');
+            
+            // Focus back to textarea for next question
+            textarea.focus();
+        }
     }
 
-    // Submit on button click (no full page reload)
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      sendQuestion(textarea.value);
-    });
-
-    // Submit on Enter (without Shift) inside textarea
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();          // prevent newline
-        sendQuestion(textarea.value);
+      function scrollToBottom() {
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
       }
-    });
-  </script>
 
-  <!-- Bootstrap JS (optional, only if you later use modals, toasts, etc.) -->
-  <!-- <script
-    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-    integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
-    crossorigin="anonymous"
-  ></script> -->
+      function escapeHtml(text) {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+      }
+
+      function escapeHtml(text) {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+      }
+
+      // Submit on button click
+      form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          sendQuestion(textarea.value);
+      });
+
+      // Submit on Enter (without Shift) inside textarea
+      textarea.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              sendQuestion(textarea.value);
+          }
+      });
+    </script>
 </body>
 </html>
