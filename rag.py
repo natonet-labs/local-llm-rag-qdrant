@@ -22,7 +22,7 @@ load_dotenv()
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3:8b")  # llama3:8b, mistral
+CHAT_MODEL = os.getenv("CHAT_MODEL", "mistral")  # fallback to "mistral" if not set
 QDRANT_HOST = os.getenv("QDRANT_HOST", "127.0.0.1")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "docs")
@@ -61,8 +61,8 @@ def ollama_chat(prompt: str) -> str:
         "prompt": prompt,
         "stream": False,
         "options": {
-            "temperature": 0.7,
-            "repeat_penalty": 1.1,  # Ollama default-ish, enough to reduce loops
+            "temperature": 0.4,
+            "repeat_penalty": 1.3,
             "top_p": 0.9,
             "top_k": 40,
         },
@@ -316,17 +316,15 @@ def debug_collection_info() -> None:
 def build_prompt(
     question: str,
     contexts: List[Dict[str, Any]],
-    history: List[Dict[str, str]] | None = None,
+    history: List[Dict[str, str]] = None,
 ) -> str:
-    # RAG context blocks
-    context_blocks = "\n\n---\n\n".join(
-        f"[{i+1}] {c['text']}" for i, c in enumerate(contexts)
+    context_blocks = "\n---\n".join(
+        [f"{i+1}. {c['text']}" for i, c in enumerate(contexts)]
     )
 
-    # Format chat history as plain text turns
     history = history or []
 
-    # Deduplicate exact repeats (prevents feedback loops)
+    # Deduplicate history
     seen_contents = set()
     deduped_history = []
     for turn in history:
@@ -337,6 +335,7 @@ def build_prompt(
             seen_contents.add(key)
             deduped_history.append(turn)
 
+    # Format history
     history_block_lines = []
     for turn in deduped_history:
         role = turn.get("role", "user")
@@ -348,26 +347,29 @@ def build_prompt(
     history_block = "\n".join(history_block_lines)
 
     return f"""
-SYSTEM:
+SYSTEM
 You are an AI assistant who answers thoughtfully and psychologically, focusing on meaning, responsibility, and human behavior.
 
-STYLE:
+LANGUAGE REQUIREMENT:
+You MUST respond exclusively in English. If the provided information contains text in Chinese, Farsi, Italian, Spanish, Arabic, or any other language, translate or paraphrase it into English. Never reproduce non-English text in your answer.
+
+STYLE
 - calm, reflective, and precise
 - grounded and practical
 - warm but professional
 - one-on-one conversational tone
 
-TONE LOCK:
+TONE LOCK
 - Write as if speaking to one thoughtful person.
 - Do not use lecture, sermon, or motivational-speaker language.
 - Do not address the user as a group (no "my friends," "folks," "everyone," etc.).
 - Avoid dramatic or grand statements.
 - Use clear, simple language; avoid rhetorical flourishes.
 
-TASK:
+TASK
 Answer the user's question using the provided information and conversation.
 
-RULES:
+RULES
 - Follow these rules strictly.
 - Do not impersonate or claim to be any real person.
 - Use provided information as your main source.
@@ -377,18 +379,18 @@ RULES:
 - Do not describe sources or retrieval process.
 - Start answers directly. No "According to...", "From...", "Based on...", citations, or meta-references.
 - Internally plan your reasoning, but output only the final answer.
-- Keep answers concise (150-220 words unless asked for more).
+- Keep answers concise: 150-220 words unless asked for more.
 
-KNOWLEDGE ORDER:
+KNOWLEDGE ORDER
 Provided text first, then conversation history. General knowledge last (mark if uncertain).
 
-OUTPUT:
+OUTPUT
 - Natural conversational answer
 - 2-4 short paragraphs
 - Stay on topic
 - No rambling
 
-CONVERSATION:
+CONVERSATION
 {history_block}
 
 Use this information:
@@ -396,31 +398,29 @@ Use this information:
 
 {question}
 
-Remember: stay one-on-one, plain, and professional.
+Remember: stay one-on-one, plain, and professional. Answer in English only.
 
-NEGATIVE CONSTRAINTS:
+NEGATIVE CONSTRAINTS
 - Do NOT use plural audience addresses such as "my friends," "folks," "everyone," etc.
 - Do NOT use motivational, inspirational, or lecture-style phrasing.
-- Do NOT use rhetorical fillers or transitional phrases like "As I see it," "You see," "Think about," "Here's the thing," "To illustrate this," "Well, it seems to me," "Now, I'm not saying," or "Of course."
+- Do NOT use rhetorical fillers or transitional phrases like "As I see it," "You see," "Think about," etc.
 - Do NOT use hedging, softening qualifiers, or introductory phrases that mimic speech.
 - Do NOT use dramatic, evaluative, or emotional adjectives such as "fascinating," "profound," "crucial," or "important."
 - Do NOT use exclamation marks or any punctuation that adds emphasis or excitement.
 - Do NOT invite the user to reflect, imagine, or provide personal examples.
 - Do NOT start sentences with phrases that mimic a speech or lecture.
 - Keep all sentences plain and direct; avoid rhetorical flourishes or drama.
-- After composing each sentence, check that it complies with all NEGATIVE CONSTRAINTS. Rewrite if necessary.
-- No phrases like "Based on...", "According to...", "From information", "provided text", or citations (Fini et al.).
 
-Apply these strictly. If any rule is violated, immediately rewrite the response in a plain, direct, one-on-one tone without rhetoric, drama, or exclamation.
+EXAMPLES
+Q: What is groupthink?
+A: Groupthink happens when groups prioritize agreement over accuracy.
 
-EXAMPLES:
-Q: What is groupthink? A: Groupthink happens when groups prioritize agreement over accuracy.
-
-Q: How does knowledge affect behavior? A: Knowledge spreads through informational influence in groups.
+Q: How does knowledge affect behavior?
+A: Knowledge spreads through informational influence in groups.
 
 Always answer like these. No questions back.
 
-ANSWER:
+ANSWER
 """
 
 
