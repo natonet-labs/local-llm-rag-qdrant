@@ -357,10 +357,23 @@ Load and start the agent:
 
 ```bash
 launchctl load ~/Library/LaunchAgents/com.localragtext.api.plist
-launchctl stop com.localragtext.api
 launchctl start com.localragtext.api
-# displays the PID (Process ID) of the job if it is running
+```
+
+To restart service:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.localragtext.api.plist
+launchctl load ~/Library/LaunchAgents/com.localragtext.api.plist
+```
+
+Verify:
+
+If the output displays the PID (Process ID) of the job, it is running.
+
+```bash
 launchctl list | grep com.localragtext.api
+curl http://localhost:8000/chat
 ```
 
 ---

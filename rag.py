@@ -22,7 +22,7 @@ load_dotenv()
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "mistral")  # llama3:8b, mistral
+CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3:8b")  # llama3:8b, mistral
 QDRANT_HOST = os.getenv("QDRANT_HOST", "127.0.0.1")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "docs")
@@ -394,6 +394,13 @@ NEGATIVE CONSTRAINTS:
 - Keep all sentences plain and direct; avoid rhetorical flourishes or drama.
 - After composing each sentence, check that it complies with all NEGATIVE CONSTRAINTS. Rewrite if necessary.
 - If any of these rules are violated, immediately rewrite the response in a plain, direct, one-on-one tone without rhetoric, drama, or exclamation.
+
+EXAMPLES:
+Q: What is groupthink? A: Groupthink happens when groups prioritize agreement over accuracy.
+
+Q: How does knowledge affect behavior? A: Knowledge spreads through informational influence in groups.
+
+Always answer like these. No questions back.
 
 ANSWER:
 """
