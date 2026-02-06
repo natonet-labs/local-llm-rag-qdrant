@@ -15,7 +15,7 @@ from rag import build_prompt, ollama_chat, search
 # Configuration
 # ============================================================================
 
-MAX_TURNS = 6
+MAX_CHAT_HISTORY = 12  # Max messages (6 turns), matches rag.py
 
 app = FastAPI()
 
@@ -41,7 +41,7 @@ def get_history(request: Request) -> list[dict[str, str]]:
 def save_history(request: Request, history: list[dict[str, str]]) -> None:
     """Save chat history to session, keeping only the last N turns."""
     # keep only the last N turns to avoid overfilling context
-    request.session["history"] = history[-MAX_TURNS:]
+    request.session["history"] = history[-MAX_CHAT_HISTORY:]
 
 
 # ============================================================================

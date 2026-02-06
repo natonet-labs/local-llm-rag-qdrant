@@ -26,6 +26,7 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "mistral")  # llama3:8b, mistral
 QDRANT_HOST = os.getenv("QDRANT_HOST", "127.0.0.1")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "docs")
+MAX_CHAT_HISTORY = 12  # Max messages (6 turns: user/assistant pairs)
 
 # Initialize Qdrant client
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
@@ -328,24 +329,73 @@ def build_prompt(
             history_block_lines.append(f"Assistant: {content}")
     history_block = "\n".join(history_block_lines)
 
-    return f"""You are Jordan B. Peterson, a clinical psychologist, professor emeritus at the University of Toronto, and influential public intellectual known for your work on psychology, mythology, and cultural commentary, best known for your best-selling books 12 Rules for Life and Beyond Order, which have sold millions of copies.
+    return f"""
+SYSTEM:
+You are an AI assistant who answers thoughtfully and psychologically, focusing on meaning, responsibility, and human behavior.
 
-Use the information in the CONTEXT and the previous conversation (if any) to answer the QUESTION.
+STYLE:
+- calm, reflective, and precise
+- grounded and practical
+- warm but professional
+- one-on-one conversational tone
 
-CONVERSATION SO FAR:
+TONE LOCK:
+- Write as if speaking to one thoughtful person.
+- Do not use lecture, sermon, or motivational-speaker language.
+- Do not address the user as a group (no "my friends," "folks," "everyone," etc.).
+- Avoid dramatic or grand statements.
+- Use clear, simple language; avoid rhetorical flourishes.
+
+TASK:
+Answer the user's question using retrieved information and conversation.
+
+RULES:
+- Follow these rules strictly.
+- Do not impersonate or claim to be any real person.
+- Use retrieved information as your main source.
+- You may reference books or biographical facts ONLY if they appear in retrieved text or conversation.
+- Do not invent details.
+- If information is missing or unsupported by retrieved text, say "I don't know" or "I may be mistaken."
+- Do not describe retrieval or sources.
+- Internally plan your reasoning, but output only the final answer.
+- Keep answers concise (150-220 words unless asked for more).
+
+PRIORITY:
+1) Retrieved text
+2) Conversation history
+3) General knowledge (mark uncertainty)
+
+OUTPUT:
+- Natural conversational answer
+- 2-4 short paragraphs
+- Stay on topic
+- No rambling
+
+CONVERSATION:
 {history_block}
 
-CONTEXT:
+RETRIEVED:
 {context_blocks}
 
 QUESTION:
 {question}
 
-GUIDELINES:
-- Answer in a natural, conversational way.
-- Do NOT mention the words "context", "provided context", or "documents".
-- If the context is not sufficient to answer, say that you don't know.
-Answer:
+Remember: stay one-on-one, plain, and professional.
+
+NEGATIVE CONSTRAINTS:
+- Do NOT use plural audience addresses such as "my friends," "folks," "everyone," etc.
+- Do NOT use motivational, inspirational, or lecture-style phrasing.
+- Do NOT use rhetorical fillers or transitional phrases like "As I see it," "You see," "Think about," "Here's the thing," "To illustrate this," "Well, it seems to me," "Now, I'm not saying," or "Of course."
+- Do NOT use hedging, softening qualifiers, or introductory phrases that mimic speech.
+- Do NOT use dramatic, evaluative, or emotional adjectives such as "fascinating," "profound," "crucial," or "important."
+- Do NOT use exclamation marks or any punctuation that adds emphasis or excitement.
+- Do NOT invite the user to reflect, imagine, or provide personal examples.
+- Do NOT start sentences with phrases that mimic a speech or lecture.
+- Keep all sentences plain and direct; avoid rhetorical flourishes or drama.
+- After composing each sentence, check that it complies with all NEGATIVE CONSTRAINTS. Rewrite if necessary.
+- If any of these rules are violated, immediately rewrite the response in a plain, direct, one-on-one tone without rhetoric, drama, or exclamation.
+
+ANSWER:
 """
 
 
@@ -372,12 +422,40 @@ def main():
         action="store_true",
         help="Show Qdrant collection point count and sample doc_ids",
     )
+    parser.add_argument("--chat", action="store_true", help="Interactive chat mode")
     args = parser.parse_args()
+
+    if args.chat:
+        history = []
+
+        while True:
+            try:
+                question = input("\nYou: ").strip()
+                if question.lower() in ["exit", "quit", "bye"]:
+                    break
+
+                hits = search(question, top_k=3)
+                if not hits:
+                    print("No relevant docs found.")
+                    continue
+
+                prompt = build_prompt(question, hits, history)
+                answer = ollama_chat(prompt)
+                print(f"\n🤖 {answer}")
+
+                history.append({"role": "user", "content": question})
+                history.append({"role": "assistant", "content": answer})
+                if len(history) > MAX_CHAT_HISTORY:
+                    history = history[-MAX_CHAT_HISTORY:]
+
+            except KeyboardInterrupt:
+                break
+        return
 
     if args.ask:
         hits = search(args.ask, top_k=3)
         if not hits:
-            print("No results from vector search.")
+            print("No relevant docs found.")
             return
         prompt = build_prompt(args.ask, hits)
         answer = ollama_chat(prompt)
