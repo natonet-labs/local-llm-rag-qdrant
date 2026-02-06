@@ -70,9 +70,12 @@ async def chat_post(request: Request, question: str = Form(...)):
     # load existing chat history for this browser session
     history = get_history(request)
 
-    # standard RAG pipeline
+    # Trim history before building prompt
+    if len(history) >= MAX_CHAT_HISTORY:
+        history = history[-MAX_CHAT_HISTORY:]
+
     results = search(question)
-    prompt = build_prompt(question, results, history=history)
+    prompt = build_prompt(question, results, history)
     answer = ollama_chat(prompt)
 
     # append this turn to history

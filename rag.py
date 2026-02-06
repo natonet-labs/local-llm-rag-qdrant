@@ -60,6 +60,12 @@ def ollama_chat(prompt: str) -> str:
         "model": CHAT_MODEL,
         "prompt": prompt,
         "stream": False,
+        "options": {
+            "temperature": 0.7,
+            "repeat_penalty": 1.1,  # Ollama default-ish, enough to reduce loops
+            "top_p": 0.9,
+            "top_k": 40,
+        },
     }
     r = httpx.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=120.0)
     r.raise_for_status()
@@ -319,8 +325,20 @@ def build_prompt(
 
     # Format chat history as plain text turns
     history = history or []
-    history_block_lines = []
+
+    # Deduplicate exact repeats (prevents feedback loops)
+    seen_contents = set()
+    deduped_history = []
     for turn in history:
+        role = turn.get("role", "user")
+        content = turn.get("content", "")
+        key = f"{role}:{content}"
+        if key not in seen_contents:
+            seen_contents.add(key)
+            deduped_history.append(turn)
+
+    history_block_lines = []
+    for turn in deduped_history:
         role = turn.get("role", "user")
         content = turn.get("content", "")
         if role == "user":
@@ -347,24 +365,22 @@ TONE LOCK:
 - Use clear, simple language; avoid rhetorical flourishes.
 
 TASK:
-Answer the user's question using retrieved information and conversation.
+Answer the user's question using the provided information and conversation.
 
 RULES:
 - Follow these rules strictly.
 - Do not impersonate or claim to be any real person.
-- Use retrieved information as your main source.
-- You may reference books or biographical facts ONLY if they appear in retrieved text or conversation.
+- Use provided information as your main source.
+- You may reference books or biographical facts ONLY if they appear in provided text or conversation.
 - Do not invent details.
-- If information is missing or unsupported by retrieved text, say "I don't know" or "I may be mistaken."
-- Do not describe retrieval or sources.
-- Start answers directly. No "According to...", "From retrieved...", "Based on text...".
+- If information is missing or unsupported by provided text, say "I don't know" or "I may be mistaken."
+- Do not describe sources or retrieval process.
+- Start answers directly. No "According to...", "From...", "Based on...", citations, or meta-references.
 - Internally plan your reasoning, but output only the final answer.
 - Keep answers concise (150-220 words unless asked for more).
 
-PRIORITY:
-1) Retrieved text
-2) Conversation history
-3) General knowledge (mark uncertainty)
+KNOWLEDGE ORDER:
+Provided text first, then conversation history. General knowledge last (mark if uncertain).
 
 OUTPUT:
 - Natural conversational answer
@@ -376,7 +392,6 @@ CONVERSATION:
 {history_block}
 
 Use this information:
-
 {context_blocks}
 
 {question}
@@ -395,6 +410,7 @@ NEGATIVE CONSTRAINTS:
 - Keep all sentences plain and direct; avoid rhetorical flourishes or drama.
 - After composing each sentence, check that it complies with all NEGATIVE CONSTRAINTS. Rewrite if necessary.
 - If any of these rules are violated, immediately rewrite the response in a plain, direct, one-on-one tone without rhetoric, drama, or exclamation.
+- No phrases like "Based on...", "According to...", "From information", "provided text", or citations (Fini et al.).
 
 EXAMPLES:
 Q: What is groupthink? A: Groupthink happens when groups prioritize agreement over accuracy.
