@@ -1,256 +1,402 @@
-# Qdrant Docker Helper
+# Qdrant Native Helper
 
-## Run Qdrant
+This document describes how to build, run, troubleshoot, and manage Qdrant natively without Docker, so your local RAG stack stays fully native.
 
-Run Qdrant with default ports:
+---
 
-```bash
-docker run -d --name qdrant \
-  -p 6333:6333 \
-  -p 6334:6334 \
-  qdrant/qdrant
-```
+## 1. Prereqs for native Qdrant build (macOS ARM)
 
-Run Qdrant with a bind-mounted storage directory:
+You only *need* a working Rust toolchain. Homebrew `protobuf` / `llvm` are optional and not required for your current setup.
 
-```bash
-mkdir -p /path/to/qdrant_storage
+### 1.1 Install Rust via rustup
 
-docker run -d --name qdrant \
-  -p 6333:6333 \
-  -p 6334:6334 \
-  -v /path/to/qdrant_storage:/qdrant/storage \
-  qdrant/qdrant
-```
-
-Run Qdrant with a different container name:
+If you haven’t already:
 
 ```bash
-docker run -d --name my-qdrant \
-  -p 6333:6333 \
-  -p 6334:6334 \
-  qdrant/qdrant
+# Install rustup via Homebrew
+brew install rustup
+
+# Initialize Rust toolchain (this is the critical step)
+rustup default stable
 ```
 
+This downloads and installs `cargo`, `rustc`, `rustfmt`, etc.
 
+### 1.2 Ensure `cargo` is on PATH
+
+Rustup puts its binaries in `~/.cargo/bin`. Add that to your shell:
+
+```bash
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Sanity check:
+
+```bash
+which cargo
+cargo --version
+rustc --version
+# Expect something like:
+# /Users/<you>/.cargo/bin/cargo
+# cargo 1.93.0 (...)
+```
+
+You can ignore `llvm` as a CLI; there is no `llvm` binary to run. macOS’s own `clang` is usually enough.
+
+---
+
+## 2. Build Qdrant from source
+
+Pick a project directory:
+
+```bash
+cd ~/projects
+git clone https://github.com/qdrant/qdrant.git
+cd qdrant
+```
+
+(Optional, you already did this):
+
+```bash
+rustup component add rustfmt
+```
+
+Build Qdrant in release mode:
+
+```bash
+cargo build --release --bin qdrant
+```
+
+- First build can take a while (downloads crates, compiles everything).
+- Subsequent builds are much faster thanks to cached artifacts.
+
+The resulting binary will be here:
+
+```bash
+~/projects/qdrant/target/release/qdrant
+```
+
+---
+
+## 3. Running Qdrant (foreground and background)
+
+### 3.1 Foreground (debugging)
+
+```bash
+cd ~/projects/qdrant
+./target/release/qdrant
+```
+
+Leave this terminal open; logs print here. Qdrant listens on port `6333` by default.
+
+Health check from another terminal:
+
+```bash
+curl http://127.0.0.1:6333/healthz
+```
+
+You should see an `OK` or small JSON.
+
+### 3.2 Background (simple `nohup`)
+
+```bash
+cd ~/projects/qdrant
+nohup ./target/release/qdrant > qdrant.log 2>&1 &
+```
+
+- Logs go to `qdrant.log` in the repo.
+- Check if it’s running:
+
+```bash
+ps aux | grep qdrant | grep target/release
+```
+
+Stop it:
+
+```bash
+pkill -f "target/release/qdrant"
+```
+
+---
+
+## 4. Unified helper script (`qdrant.sh`)
+
+Use a single script to start/stop/restart/status/logs.
+
+Create `qdrant.sh` in your `local-rag-text` project (or wherever you prefer):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Configuration
+QDRANT_DIR="${QDRANT_DIR:-$HOME/projects/qdrant}"
+QDRANT_BIN="$QDRANT_DIR/target/release/qdrant"
+LOG_FILE="${QDRANT_DIR}/qdrant.log"
+
+# Ensure Rust/Cargo bin is on PATH
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# Only show warnings and errors from Qdrant (hides INFO HTTP logs)
+export QDRANT__LOG_LEVEL=warn
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") {start|stop|restart|status|logs}
+
+Commands:
+  start    Start Qdrant in the background
+  stop     Stop Qdrant
+  restart  Restart Qdrant
+  status   Show whether Qdrant is running
+  logs     Tail Qdrant log file
+EOF
+  exit 1
+}
+
+ensure_binary() {
+  if [[ ! -x "$QDRANT_BIN" ]]; then
+    echo "Qdrant binary not found at: $QDRANT_BIN"
+    echo "Build it once with:"
+    echo "  cd \"$QDRANT_DIR\" && cargo build --release --bin qdrant"
+    exit 1
+  fi
+}
+
+is_running() {
+  pgrep -f "$QDRANT_BIN" >/dev/null 2>&1
+}
+
+start_qdrant() {
+  ensure_binary
+
+  if is_running; then
+    echo "Qdrant is already running."
+    exit 0
+  fi
+
+  echo "Starting Qdrant from $QDRANT_BIN ..."
+  cd "$QDRANT_DIR"
+  nohup "$QDRANT_BIN" > "$LOG_FILE" 2>&1 &
+
+  sleep 2
+
+  if is_running; then
+    echo "Qdrant started. Logs: $LOG_FILE"
+  else
+    echo "Failed to start Qdrant. Check logs: $LOG_FILE"
+    exit 1
+  fi
+}
+
+stop_qdrant() {
+  if is_running; then
+    pkill -f "$QDRANT_BIN"
+    echo "Qdrant stopped."
+  else
+    echo "Qdrant is not running."
+  fi
+}
+
+status_qdrant() {
+  if is_running; then
+    echo "Qdrant is running (PID(s): $(pgrep -f "$QDRANT_BIN" | tr '\n' ' '))."
+  else
+    echo "Qdrant is not running."
+  fi
+}
+
+logs_qdrant() {
+  if [[ ! -f "$LOG_FILE" ]]; then
+    echo "Log file not found: $LOG_FILE"
+    exit 1
+  fi
+  tail -n 100 -f "$LOG_FILE"
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  start)   start_qdrant ;;
+  stop)    stop_qdrant ;;
+  restart) stop_qdrant; start_qdrant ;;
+  status)  status_qdrant ;;
+  logs)    logs_qdrant ;;
+  *)       usage ;;
+esac
+```
+
+Make it executable:
+
+```bash
+chmod +x qdrant.sh
+```
+
+Usage:
+
+```bash
+./qdrant.sh start
+./qdrant.sh status
+./qdrant.sh logs
+./qdrant.sh stop
+./qdrant.sh restart
+```
+
+---
+
+## 5. Qdrant as a launchd service (auto-start on login)
+
+To align with your `com.localragtext.api` service, create a launch agent for Qdrant so it starts automatically after reboot.
+
+Create `~/Library/LaunchAgents/com.localragtext.qdrant.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.localragtext.qdrant</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/bash</string>
+      <string>/Users/username/projects/local-rag-text/qdrant.sh</string>
+      <string>start</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/username/projects/local-rag-text</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/username/.cargo/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+  </dict>
+</plist>
+```
+
+Replace `username` and paths to match your user and project location.
+
+Load and start:
+
+```bash
+launchctl load  ~/Library/LaunchAgents/com.localragtext.qdrant.plist
+launchctl start com.localragtext.qdrant
+```
+
+Check:
+
+```bash
+launchctl list | grep com.localragtext.qdrant
+lsof -i :6333
+```
+
+Restart after plist edits:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.localragtext.qdrant.plist
+launchctl load   ~/Library/LaunchAgents/com.localragtext.qdrant.plist
+```
+
+Stop/start by label:
+
+```bash
+launchctl stop  com.localragtext.qdrant
+launchctl start com.localragtext.qdrant
+```
+
+---
+
+## 6. Reset / recreate Qdrant data
+
+To wipe Qdrant’s data and re-ingest from scratch:
+
+1. Stop Qdrant:
+
+   ```bash
+   ./qdrant.sh stop
+   ```
+
+2. Remove its storage directory (default `storage` inside the repo):
+
+   ```bash
+   cd ~/projects/qdrant
+   rm -rf storage
+   ```
+
+3. Start Qdrant again:
+
+   ```bash
+   ./qdrant.sh start
+   ```
+
+4. Re-ingest your PDFs (from your RAG project):
+
+   ```bash
+   cd ~/projects/local-rag-text
+   source .venv/bin/activate
+   ./ingest_pdf.sh --force
+   ```
+
+---
+
+## 7. Troubleshooting
+
+### 7.1 Is Qdrant listening on 6333?
+
+```bash
+lsof -i :6333
+```
+
+Should show a `qdrant` process bound to that port.
+
+### 7.2 Health endpoint
+
+```bash
+curl http://127.0.0.1:6333/healthz
+```
+
+If no response, Qdrant is not running or launchd/`qdrant.sh` failed.
+
+### 7.3 Logs
+
+If started via `qdrant.sh`:
+
+```bash
+cd ~/projects/qdrant
+tail -n 100 qdrant.log
+tail -f qdrant.log
+```
+
+Look for storage path or port errors.
+
+---
+
+## 8. Integration with your RAG stack
+
+Your `.env` for the Python RAG code continues to use localhost:
+
+```env
+QDRANT_HOST=127.0.0.1
+QDRANT_PORT=6333
+QDRANT_COLLECTION=docs
+```
+
+And in `rag.py` you already have:
+
+```python
+from qdrant_client import QdrantClient
+
+client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+```
 
 ***
-
-## Check if Qdrant is running
-
-Show running Qdrant containers:
-
-```bash
-docker ps --filter "name=qdrant"
-```
-
-Check by name and show status only:
-
-```bash
-docker inspect -f '{{.State.Status}}' qdrant
-# expected: "running" | "exited" | "created"
-```
-
-Simple grep-based check:
-
-```bash
-docker ps | grep qdrant
-```
-
-
-
-***
-
-## Check Qdrant container size
-
-Show size of the `qdrant` container:
-
-```bash
-docker ps --filter "name=qdrant" --size
-```
-
-
-
-***
-
-## Start, stop, and restart Qdrant
-
-Start an existing container:
-
-```bash
-docker start qdrant
-```
-
-Stop a running container:
-
-```bash
-docker stop qdrant
-```
-
-Restart:
-
-```bash
-docker restart qdrant
-```
-
-
-
-***
-
-## Remove and recreate Qdrant
-
-Stop and remove container:
-
-```bash
-docker stop qdrant
-docker rm qdrant
-```
-
-Remove Qdrant image (optional, to pull fresh):
-
-```bash
-docker rmi qdrant/qdrant
-```
-
-Recreate with the original run command:
-
-```bash
-docker run -d --name qdrant \
-  -p 6333:6333 \
-  -p 6334:6334 \
-  qdrant/qdrant
-```
-
-
-
-***
-
-## One-liner: recreate Qdrant
-
-Stop, remove, and recreate in one go:
-
-```bash
-docker rm -f qdrant || true
-
-docker run -d --name qdrant \
-  -p 6333:6333 \
-  -p 6334:6334 \
-  qdrant/qdrant
-```
-
-
-
-***
-
-## Check Qdrant logs
-
-Tail logs:
-
-```bash
-docker logs -f qdrant
-```
-
-Show last 100 lines:
-
-```bash
-docker logs --tail 100 qdrant
-```
-
-
-***
-
-## Migrate existing Qdrant data from Docker's internal storage to an external drive
-
-1) Create a directory on the external drive  
-2) Start a new Qdrant container with that directory bind-mounted to `/qdrant/storage`  
-3) Copy the old data into the new mount (or re-index if you prefer)
-
-Here's a Markdown-style snippet with concrete commands.
-
-***
-
-## Migrate Qdrant data to external drive
-
-### 1. Prepare external drive directory
-
-Assume your external drive is mounted at `/Volumes/ExternalHDD`:
-
-```bash
-mkdir -p /Volumes/ExternalHDD/qdrant_storage
-```
-
-
-
-***
-
-### 2. Stop existing Qdrant container
-
-```bash
-docker stop qdrant
-```
-
-(Optional, back up Docker's existing data directory if you know its path.)
-
-***
-
-### 3. Start Qdrant with external storage bind mount
-
-Start a new container that uses the external drive for `/qdrant/storage`:
-
-```bash
-docker rm qdrant || true
-
-docker run -d --name qdrant \
-  -p 6333:6333 \
-  -p 6334:6334 \
-  -v /Volumes/ExternalHDD/qdrant_storage:/qdrant/storage \
-  qdrant/qdrant
-```
-
-`/qdrant/storage` is where Qdrant persists all data, so mounting it redirects storage to your external drive. [github](https://github.com/orgs/qdrant/discussions/4129)
-
-***
-
-### 4. Option A – Copy old data into the new mount (if you can locate it)
-
-If you know the original Docker-managed storage directory (example path, will vary per system):
-
-```bash
-# Example only – adjust OLD_PATH to your actual location
-OLD_PATH="/path/to/old/qdrant/storage"
-
-sudo cp -a "${OLD_PATH}/." /Volumes/ExternalHDD/qdrant_storage/
-```
-
-Then restart Qdrant:
-
-```bash
-docker restart qdrant
-```
-
-
-
-***
-
-### 5. Option B – Re-index into new Qdrant
-
-If you don't want to hunt for the old storage directory, you can:
-
-1. Start the new Qdrant container with the external mount (step 3).  
-2. Re-run your `ingest_pdf.py` / indexing pipeline to repopulate Qdrant; data will now be written to `/Volumes/ExternalHDD/qdrant_storage`. [qdrant](https://qdrant.tech/documentation/quickstart/)
-
-***
-
-### 6. Verify migration
-
-Check that Qdrant is running:
-
-```bash
-docker ps --filter "name=qdrant"
-```
-
-Check that data is being written to the external drive:
-
-```bash
-du -sh /Volumes/ExternalHDD/qdrant_storage
-```

@@ -46,7 +46,7 @@ async def ollama_chat_stream(prompt: str) -> AsyncGenerator[str, None]:
             "repeat_penalty": 1.2,
             "top_p": 0.9,
             "top_k": 40,
-            "num_ctx": 2048,
+            "num_ctx": 4096,
         },
     }
 
