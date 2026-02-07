@@ -27,7 +27,9 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "mistral")  # fallback to "mistral" if not 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "127.0.0.1")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "docs")
-MAX_CHAT_HISTORY = 12  # Max messages (6 turns: user/assistant pairs)
+MAX_CHAT_HISTORY = 8  # Max messages (4 turns: user/assistant pairs)
+MAX_TOP_K = 2  # Max relevant docs to retrieve for context
+DEBUG = True
 
 # Initialize Qdrant client
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
@@ -55,27 +57,11 @@ def ollama_embed(texts: List[str]) -> List[List[float]]:
     return embeddings
 
 
-# def ollama_chat(prompt: str) -> str:
-#     """Generate a response using Ollama chat model."""
-#     payload = {
-#         "model": CHAT_MODEL,
-#         "prompt": prompt,
-#         "stream": False,
-#         "options": {
-#             "temperature": 0.5,
-#             "repeat_penalty": 1.2,
-#             "top_p": 0.9,
-#             "top_k": 40,
-#             "num_ctx": 2048,  # Reduced from default 4096 for faster attention
-#         },
-#     }
-#     r = httpx.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=120.0)
-#     r.raise_for_status()
-#     data = r.json()
-#     return data.get("response", "")
-
-
 def ollama_chat(prompt: str) -> str:
+    ctx = 4096
+    if CHAT_MODEL.startswith("qwen2.5:7b"):
+        ctx = 2048
+
     start = time.time()
     payload = {
         "model": CHAT_MODEL,
@@ -85,8 +71,8 @@ def ollama_chat(prompt: str) -> str:
             "temperature": 0.5,
             "repeat_penalty": 1.2,
             "top_p": 0.9,
-            "top_k": 40,
-            "num_ctx": 2048,
+            "top_k": 40,  # (repetition > lower to 20-30; too stiff > raise to 50-60)
+            "num_ctx": ctx,
         },
     }
 
@@ -96,7 +82,10 @@ def ollama_chat(prompt: str) -> str:
     answer = data.get("response", "")
 
     elapsed = time.time() - start
-    print(f"[DEBUG] LLM answer length={len(answer.split())} words, time={elapsed:.2f}s")
+    if DEBUG:
+        print(
+            f"[DEBUG] LLM answer length={len(answer.split())} words, time={elapsed:.2f}s"
+        )
 
     return answer
 
@@ -247,7 +236,7 @@ def delete_by_source_prefix(source_prefix: str) -> int:
 # ============================================================================
 
 
-def search(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+def search(query: str, top_k: int = MAX_TOP_K) -> List[Dict[str, Any]]:
     """Search for relevant documents using semantic similarity."""
     query_vec = ollama_embed([query])[0]
 
@@ -439,7 +428,7 @@ def main():
                 if question.lower() in ["exit", "quit", "bye"]:
                     break
 
-                hits = search(question, top_k=3)
+                hits = search(question, top_k=MAX_TOP_K)
                 if not hits:
                     print("No relevant docs found.")
                     continue
@@ -458,16 +447,17 @@ def main():
         return
 
     if args.ask:
-        hits = search(args.ask, top_k=3)
+        hits = search(args.ask, top_k=MAX_TOP_K)
         if not hits:
             print("No relevant docs found.")
             return
         prompt = build_prompt(args.ask, hits)
         answer = ollama_chat(prompt)
-        print("\n--- CONTEXT DOCS ---")
-        for h in hits:
-            print(f"[score={h['score']:.3f}] {h['doc_id']}: {h['text'][:160]}...")
-        print("\n--- ANSWER ---")
+        if DEBUG:
+            print("\n--- CONTEXT DOCS ---")
+            for h in hits:
+                print(f"[score={h['score']:.3f}] {h['doc_id']}: {h['text'][:160]}...")
+            print("\n--- ANSWER ---")
         print(answer)
         return
 

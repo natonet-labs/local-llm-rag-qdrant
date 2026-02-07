@@ -10,7 +10,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from rag import build_prompt, search
 
-MAX_CHAT_HISTORY = 12
+MAX_CHAT_HISTORY = 8  # Max messages (4 turns: user/assistant pairs)
 
 app = FastAPI()
 app.add_middleware(
